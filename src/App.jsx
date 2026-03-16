@@ -23,6 +23,7 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   const [authForm, setAuthForm] = useState({ username: '', password: '' });
   const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 900);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState(null);
   const [filterCat, setFilterCat] = useState('all');
   const [search, setSearch] = useState('');
@@ -39,6 +40,18 @@ export default function App() {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+
+  useEffect(() => {
+    if (!isMobile) setMobileMenuOpen(false);
+  }, [isMobile]);
+
+  useEffect(() => {
+    if (isMobile && mobileMenuOpen) {
+      document.body.style.overflow = 'hidden';
+      return () => { document.body.style.overflow = ''; };
+    }
+    document.body.style.overflow = '';
+  }, [isMobile, mobileMenuOpen]);
 
   useEffect(() => {
     const onBeforeInstallPrompt = (e) => {
@@ -249,7 +262,13 @@ export default function App() {
   }
 
   const rootStyle = { ...root, ...(isMobile ? rootMobile : {}) };
-  const sidebarStyle = { ...sidebar, ...(isMobile ? sidebarMobile : {}) };
+  const sidebarStyle = {
+    ...sidebar,
+    ...(isMobile ? {
+      ...sidebarMobile,
+      ...(mobileMenuOpen ? sidebarMobileOpen : sidebarMobileClosed),
+    } : {}),
+  };
   const navBtnStyle = { ...navBtn, ...(isMobile ? navBtnMobile : {}) };
   const mainAreaStyle = { ...mainArea, ...(isMobile ? mainAreaMobile : {}) };
   const pageStyle = { ...page, ...(isMobile ? pageMobile : {}) };
@@ -259,6 +278,21 @@ export default function App() {
   return (
     <div style={rootStyle}>
       <style>{globalCSS}</style>
+
+      {isMobile && (
+        <div style={mobileTopbar}>
+          <button style={mobileMenuBtn} onClick={() => setMobileMenuOpen((v) => !v)}>
+            {mobileMenuOpen ? '✕' : '☰'}
+          </button>
+          <div style={mobileTopbarTitle}>
+            <span style={{ fontSize: 20 }}>📅</span>
+            <span>Datebook</span>
+          </div>
+          <div style={mobileTopbarView}>{VIEW_LABELS[view]}</div>
+        </div>
+      )}
+
+      {isMobile && mobileMenuOpen && <div style={mobileBackdrop} onClick={() => setMobileMenuOpen(false)} />}
 
       {/* Sidebar */}
       <aside style={sidebarStyle}>
@@ -272,14 +306,17 @@ export default function App() {
         </div>
 
         {VIEWS.map(v => (
-          <button key={v} style={{ ...navBtnStyle, ...(view === v ? navActive : {}) }} onClick={() => setView(v)}>
+          <button key={v} style={{ ...navBtnStyle, ...(view === v ? navActive : {}) }} onClick={() => {
+            setView(v);
+            if (isMobile) setMobileMenuOpen(false);
+          }}>
             <span style={{ fontSize: 16 }}>{VIEW_ICONS[v]}</span>
             {VIEW_LABELS[v]}
           </button>
         ))}
 
-        <div style={{ marginTop: 'auto', paddingTop: isMobile ? 0 : 20, borderTop: isMobile ? 'none' : '1px solid var(--border)', display: 'flex', flexDirection: isMobile ? 'row' : 'column', gap: 8, alignItems: isMobile ? 'center' : 'stretch' }}>
-          <div style={{ fontSize: 11, color: isDB ? 'var(--success)' : 'var(--warn)', fontWeight: 600, paddingLeft: 12 }}>
+        <div style={{ marginTop: 'auto', paddingTop: 20, borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ fontSize: 11, color: isDB ? 'var(--success)' : 'var(--warn)', fontWeight: 600, paddingLeft: isMobile ? 0 : 12 }}>
             {isDB ? '🟢 Turso connected' : '🟡 Local storage mode'}
           </div>
           <button style={{ ...sideBtn, ...(isMobile ? sideBtnMobile : {}) }} onClick={exportJSON}>⬇️ Export JSON</button>
@@ -560,15 +597,24 @@ const sidebar = {
   position: 'sticky', top: 0, height: '100vh', flexShrink: 0,
 };
 const sidebarMobile = {
-  width: '100%',
-  height: 'auto',
-  position: 'relative',
-  borderRight: 'none',
-  borderBottom: '1px solid var(--border)',
-  padding: '14px 10px',
-  overflowX: 'auto',
-  whiteSpace: 'nowrap',
+  width: 'min(82vw, 320px)',
+  maxWidth: 320,
+  height: '100vh',
+  position: 'fixed',
+  left: 0,
+  top: 0,
+  zIndex: 1200,
+  background: 'var(--surface)',
+  borderRight: '1px solid var(--border)',
+  borderBottom: 'none',
+  padding: '18px 12px',
+  overflowY: 'auto',
+  whiteSpace: 'normal',
+  transition: 'transform .22s ease, opacity .18s ease',
+  boxShadow: '18px 0 44px rgba(0,0,0,0.45)',
 };
+const sidebarMobileOpen = { transform: 'translateX(0)', opacity: 1 };
+const sidebarMobileClosed = { transform: 'translateX(-106%)', opacity: 0 };
 const logo = {
   display: 'flex', alignItems: 'center', gap: 10, marginBottom: 28,
   padding: '0 8px', color: 'var(--text)',
@@ -579,11 +625,11 @@ const navBtn = {
   fontSize: 14, fontWeight: 500, cursor: 'pointer', textAlign: 'left', width: '100%',
 };
 const navBtnMobile = {
-  display: 'inline-flex',
-  width: 'auto',
-  whiteSpace: 'nowrap',
-  border: '1px solid var(--border)',
-  marginRight: 8,
+  display: 'flex',
+  width: '100%',
+  whiteSpace: 'normal',
+  border: 'none',
+  marginRight: 0,
 };
 const navActive = { background: 'rgba(124,111,255,0.15)', color: 'var(--accent)' };
 const sideBtn = {
@@ -591,9 +637,57 @@ const sideBtn = {
   background: 'transparent', color: 'var(--muted)', fontSize: 12, cursor: 'pointer',
   textAlign: 'left', display: 'block', width: '100%',
 };
-const sideBtnMobile = { width: 'auto', whiteSpace: 'nowrap', padding: '8px 10px', fontSize: 11 };
+const sideBtnMobile = { width: '100%', whiteSpace: 'normal', padding: '9px 12px', fontSize: 12 };
 const mainArea = { flex: 1, padding: '40px 48px', overflowY: 'auto' };
-const mainAreaMobile = { padding: '18px 12px' };
+const mainAreaMobile = { padding: '84px 12px 16px' };
+const mobileTopbar = {
+  position: 'fixed',
+  top: 0,
+  left: 0,
+  right: 0,
+  height: 64,
+  zIndex: 1150,
+  display: 'grid',
+  gridTemplateColumns: '44px 1fr auto',
+  alignItems: 'center',
+  gap: 10,
+  padding: '10px 12px',
+  background: 'rgba(13,13,26,0.92)',
+  borderBottom: '1px solid var(--border)',
+  backdropFilter: 'blur(8px)',
+};
+const mobileMenuBtn = {
+  width: 40,
+  height: 40,
+  borderRadius: 10,
+  border: '1px solid var(--border)',
+  background: 'var(--surface2)',
+  color: 'var(--text)',
+  fontSize: 18,
+  fontWeight: 700,
+};
+const mobileTopbarTitle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  fontWeight: 800,
+  fontSize: 17,
+  color: 'var(--text)',
+};
+const mobileTopbarView = {
+  fontSize: 11,
+  fontWeight: 700,
+  textTransform: 'uppercase',
+  letterSpacing: 0.8,
+  color: 'var(--muted)',
+};
+const mobileBackdrop = {
+  position: 'fixed',
+  inset: 0,
+  zIndex: 1100,
+  background: 'rgba(0,0,0,0.45)',
+  backdropFilter: 'blur(2px)',
+};
 const page = { maxWidth: 900, margin: '0 auto' };
 const pageMobile = { maxWidth: '100%' };
 const pageTitle = { fontSize: 26, fontWeight: 900, color: 'var(--text)', marginBottom: 28, letterSpacing: -0.5 };
