@@ -1,6 +1,6 @@
 # 📅 Datebook
 
-My passion project calendar app with Nepali (BS) + English (AD) dual calendar, event management, secure login, email notifications, and PWA install support.
+A timepass side project calendar app with Nepali (BS) + English (AD) dual calendar, event management, secure login, email notifications, and PWA install support.
 
 I built this for myself so I do not forget important dates.
 There is no public demo. If anyone wants to use it, they need to self-host their own copy.
