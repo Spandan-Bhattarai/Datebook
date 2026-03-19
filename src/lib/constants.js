@@ -10,15 +10,15 @@ export const CATEGORIES = {
   custom:    { label: 'Custom',    emoji: '📌', color: '#74b9ff', bg: 'rgba(116,185,255,0.12)' },
 };
 
+export function parseISODate(dateStr) {
+  return new Date(dateStr + 'T00:00:00');
+}
+
 export function daysUntil(dateStr) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const target = new Date(dateStr + 'T00:00:00');
-  // For birthdays/recurring, use this year or next
-  const thisYear = new Date(target);
-  thisYear.setFullYear(today.getFullYear());
-  if (thisYear < today) thisYear.setFullYear(today.getFullYear() + 1);
-  return Math.round((thisYear - today) / 86400000);
+  const target = parseISODate(dateStr);
+  return Math.round((target - today) / 86400000);
 }
 
 export function formatADDate(dateStr) {

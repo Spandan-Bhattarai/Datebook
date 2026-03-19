@@ -2,16 +2,36 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useEvents } from './lib/useEvents';
 import { CATEGORIES, daysUntil, formatADDate, todayISO } from './lib/constants';
-import { formatBSDate, formatBSDateEn } from './lib/nepali';
+import { formatBSDate, formatBSDateEn, adToBS, bsToAD, BS_MONTHS_EN } from './lib/nepali';
 import { isAuthConfigured, verifyLogin } from './lib/auth';
 import { parseBulkText } from './lib/bulkParser';
 import EventModal from './components/EventModal';
 import DualCalendar from './components/DualCalendar';
 import Toast from './components/Toast';
 
-const VIEWS = ['overview', 'calendar', 'add', 'bulk', 'list', 'settings'];
-const VIEW_ICONS = { overview: '🏠', calendar: '🗓️', add: '➕', bulk: '📋', list: '📄', settings: '⚙️' };
-const VIEW_LABELS = { overview: 'Overview', calendar: 'Calendar', add: 'Add Event', bulk: 'Bulk Import', list: 'All Events', settings: 'Settings' };
+const VIEWS = ['overview', 'calendar', 'add', 'bulk', 'list', 'past', 'converter', 'age', 'settings'];
+const VIEW_ICONS = {
+  overview: '🏠', calendar: '🗓️', add: '➕', bulk: '📋', list: '📄',
+  past: '🕰️', converter: '🔁', age: '🎂', settings: '⚙️'
+};
+const VIEW_LABELS = {
+  overview: 'Overview', calendar: 'Calendar', add: 'Add Event', bulk: 'Bulk Import',
+  list: 'All Events', past: 'Past Events', converter: 'Date Converter', age: 'Age Calculator', settings: 'Settings'
+};
+
+function toISOFromDateObject(dateObj) {
+  const d = new Date(dateObj);
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString().split('T')[0];
+}
+
+function renderDaysLabel(days) {
+  if (days === 0) return '🎉 Today';
+  if (days === 1) return 'Tomorrow';
+  if (days === -1) return '1d ago';
+  if (days < 0) return `${Math.abs(days)}d ago`;
+  return `${days}d`;
+}
 
 export default function App() {
   const { events, loading, error, addEvent, editEvent, removeEvent, bulkAdd, isDB } = useEvents();
@@ -31,9 +51,20 @@ export default function App() {
 
   // Form state
   const [form, setForm] = useState({ date: todayISO(), name: '', category: 'event', notes: '', notify_email: '' });
+  const [addDateMode, setAddDateMode] = useState('ad'); // ad | bs
+  const initialBS = adToBS(new Date(todayISO() + 'T00:00:00')) || { year: 2082, month: 0, day: 1 };
+  const [bsForm, setBsForm] = useState({ year: initialBS.year, month: initialBS.month + 1, day: initialBS.day });
   const [bulkText, setBulkText] = useState('');
   const [bulkCat, setBulkCat] = useState('birthday');
   const [emailSetting, setEmailSetting] = useState(() => localStorage.getItem('datebook_email') || '');
+
+  const [converterTab, setConverterTab] = useState('ad2bs');
+  const [adConvertDate, setAdConvertDate] = useState(todayISO());
+  const [bsConvert, setBsConvert] = useState({ year: initialBS.year, month: initialBS.month + 1, day: initialBS.day });
+
+  const [ageMode, setAgeMode] = useState('ad');
+  const [ageAdDate, setAgeAdDate] = useState(todayISO());
+  const [ageBsDate, setAgeBsDate] = useState({ year: initialBS.year, month: initialBS.month + 1, day: initialBS.day });
 
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth <= 900);
@@ -72,6 +103,39 @@ export default function App() {
 
   function notify(msg, type = 'success') {
     setToast({ msg, type });
+  }
+
+  function updateBSForm(next) {
+    setBsForm(next);
+    const adDate = bsToAD(Number(next.year), Number(next.month) - 1, Number(next.day));
+    if (adDate && !Number.isNaN(adDate.getTime())) {
+      setForm((f) => ({ ...f, date: toISOFromDateObject(adDate) }));
+    }
+  }
+
+  function getAge(adDateStr) {
+    const birth = new Date(adDateStr + 'T00:00:00');
+    const now = new Date();
+    birth.setHours(0, 0, 0, 0);
+    now.setHours(0, 0, 0, 0);
+    if (Number.isNaN(birth.getTime()) || birth > now) return null;
+
+    let years = now.getFullYear() - birth.getFullYear();
+    let months = now.getMonth() - birth.getMonth();
+    let days = now.getDate() - birth.getDate();
+
+    if (days < 0) {
+      const prevMonthDays = new Date(now.getFullYear(), now.getMonth(), 0).getDate();
+      days += prevMonthDays;
+      months -= 1;
+    }
+    if (months < 0) {
+      months += 12;
+      years -= 1;
+    }
+
+    const totalDays = Math.floor((now - birth) / 86400000);
+    return { years, months, days, totalDays };
   }
 
   // ---- Add single event ----
@@ -160,12 +224,37 @@ export default function App() {
       });
   }, [events, filterCat, search, sortDir]);
 
+  const pastEvents = useMemo(() => {
+    return [...events]
+      .filter((e) => daysUntil(e.date) < 0)
+      .sort((a, b) => daysUntil(b.date) - daysUntil(a.date));
+  }, [events]);
+
   const upcoming5 = useMemo(() => {
     return [...events]
       .map(e => ({ ...e, days: daysUntil(e.date) }))
+      .filter((e) => e.days >= 0)
       .sort((a, b) => a.days - b.days)
       .slice(0, 6);
   }, [events]);
+
+  const adConverted = useMemo(() => {
+    const bs = adToBS(new Date(adConvertDate + 'T00:00:00'));
+    return bs;
+  }, [adConvertDate]);
+
+  const bsConvertedDate = useMemo(() => {
+    const d = bsToAD(Number(bsConvert.year), Number(bsConvert.month) - 1, Number(bsConvert.day));
+    if (!d || Number.isNaN(d.getTime())) return '';
+    return toISOFromDateObject(d);
+  }, [bsConvert]);
+
+  const ageFromAD = useMemo(() => getAge(ageAdDate), [ageAdDate]);
+  const ageFromBS = useMemo(() => {
+    const d = bsToAD(Number(ageBsDate.year), Number(ageBsDate.month) - 1, Number(ageBsDate.day));
+    if (!d || Number.isNaN(d.getTime())) return null;
+    return getAge(toISOFromDateObject(d));
+  }, [ageBsDate]);
 
   const catCounts = useMemo(() => {
     const counts = {};
@@ -404,6 +493,12 @@ export default function App() {
                 <input placeholder="e.g. FIFA World Cup Final" value={form.name}
                   onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required />
               </Field>
+              <div style={tabRow}>
+                <button type="button" style={{ ...tabBtn, ...(addDateMode === 'ad' ? tabBtnActive : {}) }} onClick={() => setAddDateMode('ad')}>AD Date</button>
+                <button type="button" style={{ ...tabBtn, ...(addDateMode === 'bs' ? tabBtnActive : {}) }} onClick={() => setAddDateMode('bs')}>BS Date</button>
+              </div>
+
+              {addDateMode === 'ad' ? (
               <div style={formSplitStyle}>
                 <Field label="Date (AD)">
                   <input type="date" value={form.date}
@@ -417,6 +512,39 @@ export default function App() {
                   </select>
                 </Field>
               </div>
+              ) : (
+                <>
+                  <div style={formSplitStyle}>
+                    <Field label="BS Year">
+                      <input type="number" value={bsForm.year}
+                        onChange={e => updateBSForm({ ...bsForm, year: e.target.value })} min={2000} max={2200} required />
+                    </Field>
+                    <Field label="BS Month">
+                      <select value={bsForm.month} onChange={e => updateBSForm({ ...bsForm, month: e.target.value })}>
+                        {BS_MONTHS_EN.map((m, i) => <option key={m} value={i + 1}>{i + 1}. {m}</option>)}
+                      </select>
+                    </Field>
+                  </div>
+                  <div style={formSplitStyle}>
+                    <Field label="BS Day">
+                      <input type="number" value={bsForm.day}
+                        onChange={e => updateBSForm({ ...bsForm, day: e.target.value })} min={1} max={32} required />
+                    </Field>
+                    <Field label="Converted AD Date">
+                      <input type="date" value={form.date} readOnly />
+                    </Field>
+                  </div>
+                  <div style={formSplitStyle}>
+                    <Field label="Category">
+                      <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}>
+                        {Object.entries(CATEGORIES).map(([k, v]) => (
+                          <option key={k} value={k}>{v.emoji} {v.label}</option>
+                        ))}
+                      </select>
+                    </Field>
+                  </div>
+                </>
+              )}
               {form.date && (
                 <div style={bsPreview} className="nepali-font">
                   📅 BS: {formatBSDate(form.date)}
@@ -497,12 +625,140 @@ export default function App() {
                       </div>
                     </div>
                     <div style={{ ...daysChip, color: cat.color, borderColor: cat.color + '44', background: cat.bg, flexShrink: 0 }}>
-                      {days === 0 ? '🎉 Today' : days === 1 ? 'Tomorrow' : `${days}d`}
+                      {renderDaysLabel(days)}
                     </div>
                   </div>
                 );
               })}
             </div>
+          </div>
+        )}
+
+        {/* ── PAST ── */}
+        {view === 'past' && !loading && (
+          <div style={pageStyle}>
+            <h1 style={pageTitle}>Past Events ({pastEvents.length})</h1>
+            {pastEvents.length === 0 && <p style={emptyMsg}>No completed/past events yet.</p>}
+            <div style={listGrid}>
+              {pastEvents.map((e) => {
+                const cat = CATEGORIES[e.category] || CATEGORIES.event;
+                const days = daysUntil(e.date);
+                return (
+                  <div key={e.id} style={{ ...listCardStyle, borderLeft: `3px solid ${cat.color}`, opacity: 0.86 }} onClick={() => setSelectedEvent(e)}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <span style={{ fontSize: 22 }}>{cat.emoji}</span>
+                      <div>
+                        <div style={evtName}>{e.name}</div>
+                        <div style={evtDate}>{formatADDate(e.date)}</div>
+                        <div style={{ fontSize: 11, color: 'var(--muted)' }} className="nepali-font">{formatBSDate(e.date)}</div>
+                      </div>
+                    </div>
+                    <div style={{ ...daysChip, color: 'var(--muted)', borderColor: 'var(--border)', background: 'var(--surface2)' }}>
+                      {renderDaysLabel(days)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ── CONVERTER ── */}
+        {view === 'converter' && (
+          <div style={pageStyle}>
+            <h1 style={pageTitle}>Date Converter</h1>
+            <div style={tabRow}>
+              <button type="button" style={{ ...tabBtn, ...(converterTab === 'ad2bs' ? tabBtnActive : {}) }} onClick={() => setConverterTab('ad2bs')}>AD → BS</button>
+              <button type="button" style={{ ...tabBtn, ...(converterTab === 'bs2ad' ? tabBtnActive : {}) }} onClick={() => setConverterTab('bs2ad')}>BS → AD</button>
+            </div>
+
+            {converterTab === 'ad2bs' && (
+              <div style={settingCard}>
+                <Field label="AD Date">
+                  <input type="date" value={adConvertDate} onChange={(e) => setAdConvertDate(e.target.value)} />
+                </Field>
+                <div style={hintBox}>
+                  <strong>BS Result:</strong><br />
+                  {adConverted ? `${adConverted.day} ${BS_MONTHS_EN[adConverted.month]} ${adConverted.year} BS` : 'Invalid AD date'}
+                </div>
+              </div>
+            )}
+
+            {converterTab === 'bs2ad' && (
+              <div style={settingCard}>
+                <div style={formSplitStyle}>
+                  <Field label="BS Year">
+                    <input type="number" value={bsConvert.year} onChange={(e) => setBsConvert({ ...bsConvert, year: e.target.value })} min={2000} max={2200} />
+                  </Field>
+                  <Field label="BS Month">
+                    <select value={bsConvert.month} onChange={(e) => setBsConvert({ ...bsConvert, month: e.target.value })}>
+                      {BS_MONTHS_EN.map((m, i) => <option key={m} value={i + 1}>{i + 1}. {m}</option>)}
+                    </select>
+                  </Field>
+                </div>
+                <div style={formSplitStyle}>
+                  <Field label="BS Day">
+                    <input type="number" value={bsConvert.day} onChange={(e) => setBsConvert({ ...bsConvert, day: e.target.value })} min={1} max={32} />
+                  </Field>
+                  <Field label="AD Result">
+                    <input type="text" value={bsConvertedDate ? formatADDate(bsConvertedDate) : 'Invalid BS date'} readOnly />
+                  </Field>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── AGE ── */}
+        {view === 'age' && (
+          <div style={pageStyle}>
+            <h1 style={pageTitle}>Age Calculator</h1>
+            <div style={tabRow}>
+              <button type="button" style={{ ...tabBtn, ...(ageMode === 'ad' ? tabBtnActive : {}) }} onClick={() => setAgeMode('ad')}>Birthdate in AD</button>
+              <button type="button" style={{ ...tabBtn, ...(ageMode === 'bs' ? tabBtnActive : {}) }} onClick={() => setAgeMode('bs')}>Birthdate in BS</button>
+            </div>
+
+            {ageMode === 'ad' ? (
+              <div style={settingCard}>
+                <Field label="Birthdate (AD)">
+                  <input type="date" value={ageAdDate} onChange={(e) => setAgeAdDate(e.target.value)} />
+                </Field>
+                {ageFromAD ? (
+                  <div style={metricGrid}>
+                    <div style={metricCard}><div style={metricNum}>{ageFromAD.years}</div><div style={metricLbl}>Years</div></div>
+                    <div style={metricCard}><div style={metricNum}>{ageFromAD.months}</div><div style={metricLbl}>Months</div></div>
+                    <div style={metricCard}><div style={metricNum}>{ageFromAD.days}</div><div style={metricLbl}>Days</div></div>
+                    <div style={metricCard}><div style={metricNum}>{ageFromAD.totalDays}</div><div style={metricLbl}>Total Days</div></div>
+                  </div>
+                ) : <p style={emptyMsg}>Enter a valid birthdate not in the future.</p>}
+              </div>
+            ) : (
+              <div style={settingCard}>
+                <div style={formSplitStyle}>
+                  <Field label="BS Year"><input type="number" value={ageBsDate.year} onChange={(e) => setAgeBsDate({ ...ageBsDate, year: e.target.value })} min={2000} max={2200} /></Field>
+                  <Field label="BS Month">
+                    <select value={ageBsDate.month} onChange={(e) => setAgeBsDate({ ...ageBsDate, month: e.target.value })}>
+                      {BS_MONTHS_EN.map((m, i) => <option key={m} value={i + 1}>{i + 1}. {m}</option>)}
+                    </select>
+                  </Field>
+                </div>
+                <div style={formSplitStyle}>
+                  <Field label="BS Day"><input type="number" value={ageBsDate.day} onChange={(e) => setAgeBsDate({ ...ageBsDate, day: e.target.value })} min={1} max={32} /></Field>
+                  <Field label="Converted AD Birthdate"><input type="text" value={(() => {
+                    const d = bsToAD(Number(ageBsDate.year), Number(ageBsDate.month) - 1, Number(ageBsDate.day));
+                    return d && !Number.isNaN(d.getTime()) ? formatADDate(toISOFromDateObject(d)) : 'Invalid BS date';
+                  })()} readOnly /></Field>
+                </div>
+                {ageFromBS ? (
+                  <div style={metricGrid}>
+                    <div style={metricCard}><div style={metricNum}>{ageFromBS.years}</div><div style={metricLbl}>Years</div></div>
+                    <div style={metricCard}><div style={metricNum}>{ageFromBS.months}</div><div style={metricLbl}>Months</div></div>
+                    <div style={metricCard}><div style={metricNum}>{ageFromBS.days}</div><div style={metricLbl}>Days</div></div>
+                    <div style={metricCard}><div style={metricNum}>{ageFromBS.totalDays}</div><div style={metricLbl}>Total Days</div></div>
+                  </div>
+                ) : <p style={emptyMsg}>Enter a valid BS birthdate.</p>}
+              </div>
+            )}
           </div>
         )}
 
@@ -692,6 +948,17 @@ const page = { maxWidth: 900, margin: '0 auto' };
 const pageMobile = { maxWidth: '100%' };
 const pageTitle = { fontSize: 26, fontWeight: 900, color: 'var(--text)', marginBottom: 28, letterSpacing: -0.5 };
 const sectionTitle = { fontSize: 12, fontWeight: 700, color: 'var(--muted)', margin: '28px 0 14px', textTransform: 'uppercase', letterSpacing: 1 };
+const tabRow = { display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 };
+const tabBtn = {
+  padding: '8px 14px',
+  borderRadius: 20,
+  border: '1px solid var(--border)',
+  background: 'var(--surface2)',
+  color: 'var(--muted)',
+  fontSize: 12,
+  fontWeight: 700,
+};
+const tabBtnActive = { color: '#fff', background: 'var(--accent)', borderColor: 'var(--accent)' };
 const statsGrid = { display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 8 };
 const statCard = {
   display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
@@ -743,6 +1010,16 @@ const settingCard = {
 };
 const settingTitle = { fontSize: 16, fontWeight: 700, color: 'var(--text)' };
 const settingDesc = { fontSize: 13, color: 'var(--muted)', lineHeight: 1.8 };
+const metricGrid = { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10, marginTop: 6 };
+const metricCard = {
+  background: 'var(--surface2)',
+  border: '1px solid var(--border)',
+  borderRadius: 10,
+  padding: '12px 10px',
+  textAlign: 'center',
+};
+const metricNum = { fontSize: 22, fontWeight: 900, color: 'var(--accent)' };
+const metricLbl = { fontSize: 11, color: 'var(--muted)', marginTop: 4, textTransform: 'uppercase', letterSpacing: 0.8 };
 const centerMsg = {
   display: 'flex', alignItems: 'center', gap: 14, color: 'var(--muted)',
   fontSize: 15, padding: '60px 0',
