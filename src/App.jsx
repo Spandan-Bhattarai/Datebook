@@ -33,6 +33,19 @@ function renderDaysLabel(days) {
   return `${days}d`;
 }
 
+function getNextBirthdayISO(dateStr) {
+  const base = new Date(dateStr + 'T00:00:00');
+  if (Number.isNaN(base.getTime())) return dateStr;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const candidate = new Date(today.getFullYear(), base.getMonth(), base.getDate());
+  candidate.setHours(0, 0, 0, 0);
+  if (candidate < today) candidate.setFullYear(candidate.getFullYear() + 1);
+  return toISOFromDateObject(candidate);
+}
+
 export default function App() {
   const { events, loading, error, addEvent, editEvent, removeEvent, bulkAdd, isDB } = useEvents();
   const [view, setView] = useState('overview');
@@ -214,10 +227,25 @@ export default function App() {
   }
 
   // ---- Filtered + sorted events ----
+  useEffect(() => {
+    if (!events.length) return;
+
+    const toUpdate = events
+      .filter((e) => e.category === 'birthday')
+      .filter((e) => getNextBirthdayISO(e.date) !== e.date)
+      .map((e) => ({ ...e, date: getNextBirthdayISO(e.date), notified: 0 }));
+
+    if (!toUpdate.length) return;
+    toUpdate.forEach((e) => {
+      editEvent(e).catch(() => {});
+    });
+  }, [events, editEvent]);
+
   const filtered = useMemo(() => {
     return events
       .filter(e => (filterCat === 'all' || e.category === filterCat) &&
-        e.name.toLowerCase().includes(search.toLowerCase()))
+        e.name.toLowerCase().includes(search.toLowerCase()) &&
+        daysUntil(e.date) >= 0)
       .sort((a, b) => {
         const da = daysUntil(a.date), db = daysUntil(b.date);
         return sortDir === 'asc' ? da - db : db - da;
