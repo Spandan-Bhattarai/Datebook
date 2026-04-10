@@ -46,6 +46,11 @@ function getNextBirthdayISO(dateStr) {
   return toISOFromDateObject(candidate);
 }
 
+function getEffectiveEventDate(event) {
+  if (event.category === 'birthday') return getNextBirthdayISO(event.date);
+  return event.date;
+}
+
 export default function App() {
   const { events, loading, error, addEvent, editEvent, removeEvent, bulkAdd, isDB } = useEvents();
   const [view, setView] = useState('overview');
@@ -226,45 +231,46 @@ export default function App() {
     notify('Deleted', 'info');
   }
 
-  // ---- Filtered + sorted events ----
-  useEffect(() => {
-    if (!events.length) return;
-
-    const toUpdate = events
-      .filter((e) => e.category === 'birthday')
-      .filter((e) => getNextBirthdayISO(e.date) !== e.date)
-      .map((e) => ({ ...e, date: getNextBirthdayISO(e.date), notified: 0 }));
-
-    if (!toUpdate.length) return;
-    toUpdate.forEach((e) => {
-      editEvent(e).catch(() => {});
+  const normalizedEvents = useMemo(() => {
+    return events.map((e) => {
+      const effectiveDate = getEffectiveEventDate(e);
+      return {
+        ...e,
+        effectiveDate,
+      };
     });
-  }, [events, editEvent]);
-
-  const filtered = useMemo(() => {
-    return events
-      .filter(e => (filterCat === 'all' || e.category === filterCat) &&
-        e.name.toLowerCase().includes(search.toLowerCase()) &&
-        daysUntil(e.date) >= 0)
-      .sort((a, b) => {
-        const da = daysUntil(a.date), db = daysUntil(b.date);
-        return sortDir === 'asc' ? da - db : db - da;
-      });
-  }, [events, filterCat, search, sortDir]);
-
-  const pastEvents = useMemo(() => {
-    return [...events]
-      .filter((e) => daysUntil(e.date) < 0)
-      .sort((a, b) => daysUntil(b.date) - daysUntil(a.date));
   }, [events]);
 
+  // ---- Filtered + sorted events ----
+
+  const filtered = useMemo(() => {
+    return normalizedEvents
+      .filter(e => (filterCat === 'all' || e.category === filterCat) &&
+        e.name.toLowerCase().includes(search.toLowerCase()) &&
+        daysUntil(e.effectiveDate) >= 0)
+      .sort((a, b) => {
+        const da = daysUntil(a.effectiveDate), db = daysUntil(b.effectiveDate);
+        return sortDir === 'asc' ? da - db : db - da;
+      });
+  }, [normalizedEvents, filterCat, search, sortDir]);
+
+  const pastEvents = useMemo(() => {
+    return [...normalizedEvents]
+      .filter((e) => daysUntil(e.effectiveDate) < 0)
+      .sort((a, b) => daysUntil(b.effectiveDate) - daysUntil(a.effectiveDate));
+  }, [normalizedEvents]);
+
   const upcoming5 = useMemo(() => {
-    return [...events]
-      .map(e => ({ ...e, days: daysUntil(e.date) }))
+    return [...normalizedEvents]
+      .map(e => ({ ...e, days: daysUntil(e.effectiveDate) }))
       .filter((e) => e.days >= 0)
       .sort((a, b) => a.days - b.days)
       .slice(0, 6);
-  }, [events]);
+  }, [normalizedEvents]);
+
+  const calendarEvents = useMemo(() => {
+    return normalizedEvents.map((e) => ({ ...e, date: e.effectiveDate }));
+  }, [normalizedEvents]);
 
   const adConverted = useMemo(() => {
     const bs = adToBS(new Date(adConvertDate + 'T00:00:00'));
@@ -488,10 +494,10 @@ export default function App() {
                     <span style={{ fontSize: 26 }}>{cat.emoji}</span>
                     <div style={{ flex: 1 }}>
                       <div style={evtName}>{e.category === 'birthday' ? `Happy Birthday, ${e.name}! 🎉` : e.name}</div>
-                      <div style={evtDate}>{formatADDate(e.date)}</div>
+                      <div style={evtDate}>{formatADDate(e.effectiveDate || e.date)}</div>
                       <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }} className="nepali-font">
-                        {formatBSDate(e.date)}
-                        <span style={{ marginLeft: 8, fontFamily: 'Outfit, sans-serif' }}>({formatBSDateEn(e.date)})</span>
+                        {formatBSDate(e.effectiveDate || e.date)}
+                        <span style={{ marginLeft: 8, fontFamily: 'Outfit, sans-serif' }}>({formatBSDateEn(e.effectiveDate || e.date)})</span>
                       </div>
                     </div>
                     <div style={{ ...daysChip, color: cat.color, borderColor: cat.color + '44', background: cat.bg }}>
@@ -508,7 +514,7 @@ export default function App() {
         {view === 'calendar' && !loading && (
           <div style={pageStyle}>
             <h1 style={pageTitle}>Calendar</h1>
-            <DualCalendar events={events} onEventClick={setSelectedEvent} />
+            <DualCalendar events={calendarEvents} onEventClick={setSelectedEvent} />
           </div>
         )}
 
@@ -638,7 +644,7 @@ export default function App() {
             <div style={listGrid}>
               {filtered.map(e => {
                 const cat = CATEGORIES[e.category] || CATEGORIES.event;
-                const days = daysUntil(e.date);
+                const days = daysUntil(e.effectiveDate || e.date);
                 return (
                   <div key={e.id} style={{ ...listCardStyle, borderLeft: `3px solid ${cat.color}` }}
                     onClick={() => setSelectedEvent(e)}>
@@ -646,9 +652,9 @@ export default function App() {
                       <span style={{ fontSize: 22 }}>{cat.emoji}</span>
                       <div>
                         <div style={evtName}>{e.category === 'birthday' ? `🎂 ${e.name}` : e.name}</div>
-                        <div style={evtDate}>{formatADDate(e.date)}</div>
+                        <div style={evtDate}>{formatADDate(e.effectiveDate || e.date)}</div>
                         <div style={{ fontSize: 11, color: 'var(--muted)' }} className="nepali-font">
-                          {formatBSDate(e.date)}
+                          {formatBSDate(e.effectiveDate || e.date)}
                         </div>
                       </div>
                     </div>
@@ -670,15 +676,15 @@ export default function App() {
             <div style={listGrid}>
               {pastEvents.map((e) => {
                 const cat = CATEGORIES[e.category] || CATEGORIES.event;
-                const days = daysUntil(e.date);
+                const days = daysUntil(e.effectiveDate || e.date);
                 return (
                   <div key={e.id} style={{ ...listCardStyle, borderLeft: `3px solid ${cat.color}`, opacity: 0.86 }} onClick={() => setSelectedEvent(e)}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                       <span style={{ fontSize: 22 }}>{cat.emoji}</span>
                       <div>
                         <div style={evtName}>{e.name}</div>
-                        <div style={evtDate}>{formatADDate(e.date)}</div>
-                        <div style={{ fontSize: 11, color: 'var(--muted)' }} className="nepali-font">{formatBSDate(e.date)}</div>
+                        <div style={evtDate}>{formatADDate(e.effectiveDate || e.date)}</div>
+                        <div style={{ fontSize: 11, color: 'var(--muted)' }} className="nepali-font">{formatBSDate(e.effectiveDate || e.date)}</div>
                       </div>
                     </div>
                     <div style={{ ...daysChip, color: 'var(--muted)', borderColor: 'var(--border)', background: 'var(--surface2)' }}>
