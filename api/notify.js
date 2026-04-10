@@ -1,6 +1,5 @@
 // api/notify.js  — Vercel Serverless Function (runs daily via cron)
-// Add to vercel.json:  "crons": [{ "path": "/api/notify", "schedule": "0 6 * * *" }]
-// This checks for events tomorrow and sends email via Resend
+// This checks for events today and sends email via Resend.
 
 export default async function handler(req, res) {
   // Security: only allow Vercel cron or manual trigger with secret
@@ -11,19 +10,20 @@ export default async function handler(req, res) {
 
   const resendKey = process.env.RESEND_API_KEY;
   if (!resendKey) return res.status(400).json({ error: 'RESEND_API_KEY not set' });
+  const fromEmail = process.env.RESEND_FROM || 'Datebook <onboarding@resend.dev>';
+  const fallbackEmail = process.env.DEFAULT_NOTIFY_EMAIL || process.env.REMINDER_TO_EMAIL || '';
 
   const tursoUrl = process.env.VITE_TURSO_URL;
   const tursoToken = process.env.VITE_TURSO_TOKEN;
   if (!tursoUrl || !tursoToken) return res.status(400).json({ error: 'Turso not configured' });
 
-  // Get tomorrow's date
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStr = tomorrow.toISOString().split('T')[0];
-  const tomorrowMMDD = tomorrowStr.slice(5);
+  // Get today's date
+  const today = new Date();
+  const todayStr = today.toISOString().split('T')[0];
+  const todayMMDD = todayStr.slice(5);
   const currentYear = String(new Date().getFullYear());
 
-  // Fetch tomorrow's events from Turso via HTTP API
+  // Fetch today's events from Turso via HTTP API
   const tursoRes = await fetch(`${tursoUrl}/v2/pipeline`, {
     method: 'POST',
     headers: {
@@ -35,16 +35,15 @@ export default async function handler(req, res) {
         type: 'execute',
         stmt: {
           sql: `SELECT * FROM events
-                WHERE notify_email != ''
-                AND (
+                WHERE (
                   (category = 'birthday' AND substr(date, 6, 5) = ? AND CAST(COALESCE(notified, 0) AS TEXT) != ?)
                   OR
                   (category != 'birthday' AND date = ? AND CAST(COALESCE(notified, 0) AS INTEGER) = 0)
                 )`,
           args: [
-            { type: 'text', value: tomorrowMMDD },
+            { type: 'text', value: todayMMDD },
             { type: 'text', value: currentYear },
-            { type: 'text', value: tomorrowStr },
+            { type: 'text', value: todayStr },
           ]
         }
       }, { type: 'close' }]
@@ -70,17 +69,18 @@ export default async function handler(req, res) {
   const sentEvents = [];
 
   for (const event of events) {
-    if (!event.notify_email) continue;
+    const recipient = (event.notify_email || fallbackEmail || '').trim();
+    if (!recipient) continue;
 
     const isbirthday = event.category === 'birthday';
     const subject = isbirthday
-      ? `🎂 Tomorrow is ${event.name}'s Birthday!`
-      : `📅 Reminder: ${event.name} is tomorrow`;
+      ? `🎂 Today is ${event.name}'s Birthday!`
+      : `📅 Reminder: ${event.name} is today`;
 
     const html = `
       <div style="font-family:sans-serif;max-width:520px;margin:0 auto;background:#0d0d1a;color:#e8e8f5;padding:32px;border-radius:16px;">
         <h1 style="font-size:28px;margin-bottom:8px;">${isbirthday ? '🎂' : '📅'} ${isbirthday ? `${event.name}'s Birthday` : event.name}</h1>
-        <p style="color:#7070a0;font-size:16px;">Tomorrow, ${new Date(event.date + 'T00:00:00').toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })}</p>
+        <p style="color:#7070a0;font-size:16px;">Today, ${new Date(event.date + 'T00:00:00').toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })}</p>
         ${event.notes ? `<div style="background:#1a1a35;border-radius:10px;padding:16px;margin-top:16px;"><p style="color:#a29bfe;margin:0;">${event.notes}</p></div>` : ''}
         <p style="color:#7070a0;font-size:12px;margin-top:24px;">Sent by Datebook • <a href="#" style="color:#7c6fff;">Manage notifications</a></p>
       </div>
@@ -94,8 +94,8 @@ export default async function handler(req, res) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: 'Datebook <notifications@yourdomain.com>', // change to your verified domain
-        to: [event.notify_email],
+        from: fromEmail,
+        to: [recipient],
         subject,
         html,
       }),

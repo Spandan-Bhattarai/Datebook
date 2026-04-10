@@ -22,7 +22,10 @@ const VIEW_LABELS = {
 function toISOFromDateObject(dateObj) {
   const d = new Date(dateObj);
   d.setHours(0, 0, 0, 0);
-  return d.toISOString().split('T')[0];
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 function renderDaysLabel(days) {
@@ -811,9 +814,20 @@ export default function App() {
                 <input type="email" placeholder="you@example.com" value={emailSetting}
                   onChange={e => setEmailSetting(e.target.value)} style={{ maxWidth: 340 }} />
               </Field>
-              <button style={{ ...submitBtn, marginTop: 12 }} onClick={() => {
-                localStorage.setItem('datebook_email', emailSetting);
-                notify('Email saved!');
+              <button style={{ ...submitBtn, marginTop: 12 }} onClick={async () => {
+                const target = emailSetting.trim();
+                if (!target) {
+                  notify('Please enter a valid email', 'error');
+                  return;
+                }
+                localStorage.setItem('datebook_email', target);
+
+                const updates = events
+                  .filter((e) => (e.notify_email || '') !== target)
+                  .map((e) => editEvent({ ...e, notify_email: target }));
+
+                if (updates.length) await Promise.allSettled(updates);
+                notify(`Email saved and applied to ${updates.length} event(s)!`);
               }}>Save Email</button>
             </div>
 
